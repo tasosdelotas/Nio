@@ -8,6 +8,14 @@
   <em>Simple. Light. And it's a friend.</em>
 </p>
 
+<p align="center">
+  <img alt="Linux" src="https://img.shields.io/badge/Platform-Linux-2E9EFF?style=flat-square&logo=linux&logoColor=white" />
+  <img alt="Local" src="https://img.shields.io/badge/Runs-100%25%20Locally-2ea44f?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-6ee7b7?style=flat-square" />
+</p>
+
+<p align="center"><sub>🐧 <strong>Linux only</strong> (Ubuntu, Mint, Fedora, Arch, …) — no Windows or macOS build.</sub></p>
+
 Nio is your loyal friend. Just click on the Nio.AppImage and chat with him.
 His mind, his memory of you, and his voice — **all of him in one file.**
 No cloud, no accounts, no server, no separate model to carry.
@@ -46,6 +54,8 @@ Everything about Nio points at one idea: **the whole friend in one file.**
 
 1. Download Nio.AppImage
 2. Click on the Nio.AppImage. Done.
+
+> 🐧 **Nio is for Linux only** (Ubuntu, Mint, Fedora, Arch, etc.). There is no Windows or macOS build.
 
 **You need only:**
 
