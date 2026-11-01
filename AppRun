@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Nio AppRun — the "being" launcher.
+# Runs when the Nio AppImage is launched:
+#   1. Resolves its own location (AppImages run from a hidden FUSE/extracted mount).
+#   2. On FIRST run, copies the bundled model into ~/Nio/models/ (the permanent "brain")
+#      — a one-time "settling in." After that it's instant.
+#   3. Boots Nio's web server (DATA_DIR = ~/Nio, so memory.md + config persist).
+#   4. Opens the system browser in --app mode (keeps TTS/STT via the browser).
+#   5. On exit, cleans up the node + llama-server processes (the hidden mount is
+#      auto-removed by the AppImage runtime).
+# The user only ever sees ONE file: Nio. Everything else is hidden.
+
+set -uo pipefail
+
+# ── 1. Resolve where Nio lives (this AppDir) ─────────────────────────────────
+APPDIR="${APPDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
+NODE="$APPDIR/usr/lib/node/bin/node"
+NIO_HOME_APP="$APPDIR/usr/share/nio"          # bundled program + config + model
+BUNDLED_MODEL_DIR="$NIO_HOME_APP/models"
+
+# Permanent "soul" folder — user data + the brain. Lives in $HOME, NEVER cleaned.
+NIO_HOME="$HOME/Nio"
+mkdir -p "$NIO_HOME" "$NIO_HOME/models" 2>/dev/null || true
+
+PORT="${NIO_PORT:-8791}"
+LLAMA_PORT="${NIO_LLAMA_PORT:-8091}"
+URL="http://127.0.0.1:${PORT}/"
+
+echo "🌟 Nio is waking up…"
+
+# ── 2. FIRST-RUN: settle the model into the permanent brain folder ───────────
+if ! ls "$NIO_HOME"/models/*.gguf >/dev/null 2>&1; then
+  echo "   First time — settling Nio's brain into your home (~2.6 GB, one-time)…"
+  for gguf in "$BUNDLED_MODEL_DIR"/*/*.gguf "$BUNDLED_MODEL_DIR"/*.gguf; do
+    [ -f "$gguf" ] || continue
+    cp -a "$gguf" "$NIO_HOME"/models/ 2>/dev/null || echo "   (warning: could not copy $gguf)"
+  done
+  if ls "$NIO_HOME"/models/*.gguf >/dev/null 2>&1; then
+    echo "   Brain settled. ✨"
+  else
+    echo "   (warning: no model found — Nio will start without a brain)"
+  fi
+fi
+
+# ── 3. Boot the web server (DATA_DIR = ~/Nio so memory.md + config persist) ──
+SERVER_PID=""
+cleanup() {
+  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null || true
+  fi
+  local lp
+  lp=$(ss -ltnp 2>/dev/null | grep ":${LLAMA_PORT}" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+  [ -n "${lp:-}" ] && kill "$lp" 2>/dev/null || true
+  wait 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+if curl -s "http://127.0.0.1:${PORT}/state" >/dev/null 2>&1; then
+  echo "   Nio is already awake at $URL"
+else
+  echo "   Starting Nio on :${PORT}…"
+  (
+    cd "$NIO_HOME_APP" || exit 1
+    NIO_HOME="$NIO_HOME" WEB_PORT="$PORT" "$NODE" web.js --port "$PORT" >> "$NIO_HOME/server.log" 2>&1
+  ) &
+  SERVER_PID=$!
+  echo "$SERVER_PID" > "$NIO_HOME/server.pid"
+  ready=0
+  for i in $(seq 1 30); do
+    if curl -s "http://127.0.0.1:${PORT}/state" >/dev/null 2>&1; then ready=1; break; fi
+    sleep 0.5
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "   ⚠️ Nio did not come up in time. Log: $NIO_HOME/server.log"
+  fi
+fi
+
+# ── 4. Register Nio's icon in the hicolor theme (so the taskbar shows the
+#      transparent one, matched by the window's --class=nio) — idempotent ──
+register_icon() {
+  local SRC="$NIO_HOME_APP/nio.png"
+  [ -f "$SRC" ] || return 0
+  local HC="$HOME/.local/share/icons/hicolor" px
+  for px in 16 22 24 32 48 64 128 256 512; do
+    mkdir -p "$HC/${px}x${px}/apps" 2>/dev/null || true
+    if command -v convert >/dev/null 2>&1; then
+      # Resize to the exact slot size ("!" forces it), Lanczos-antialiased, so the
+      # small title-bar slots (16/22/24px) get a crisp tile instead of the WM
+      # downscaling the full master itself (that was the blurry-favicon bug).
+      convert "$SRC" -resize ${px}x${px}! -filter Lanczos -define png:color-type=6 \
+        "$HC/${px}x${px}/apps/nio.png" 2>/dev/null \
+        || cp "$SRC" "$HC/${px}x${px}/apps/nio.png" 2>/dev/null || true
+    else
+      cp "$SRC" "$HC/${px}x${px}/apps/nio.png" 2>/dev/null || true
+    fi
+  done
+  gtk-update-icon-cache "$HC" >/dev/null 2>&1 || true
+  rm -f "$HOME/.cache/icon-cache.kcache" 2>/dev/null || true
+  find "$HOME/.cache" -maxdepth 2 -name 'icon-cache.*' -delete 2>/dev/null || true
+}
+register_icon
+
+# ── 5. Open the system browser in --app mode (keeps TTS/STT) ─────────────────
+open_browser() {
+  local BROWSER="" BT=""
+  for c in microsoft-edge microsoft-edge-stable google-chrome google-chrome-stable brave-browser chromium chromium-browser; do
+    if command -v "$c" >/dev/null 2>&1; then BROWSER="$c"; BT="chromium"; break; fi
+  done
+  if [ -z "$BROWSER" ] && command -v firefox >/dev/null 2>&1; then BROWSER="firefox"; BT="firefox"; fi
+
+  local W=1200 H=820 X=60 Y=40
+  if command -v xrandr >/dev/null 2>&1; then
+    local RES
+    RES=$(xrandr 2>/dev/null | grep -Eo 'current[[:space:]]+[0-9]+[[:space:]]+x[[:space:]]+[0-9]+' | head -1 | grep -Eo '[0-9]+' | awk 'NR==1{w=$1}NR==2{h=$1}END{print w"x"h}')
+    if [ -n "$RES" ]; then
+      local SW="${RES%x*}" SH="${RES#*x}"
+      [ "$SW" -ge 1 ] 2>/dev/null && X=$(( (SW - W) / 2 )); [ "$X" -lt 0 ] && X=60
+      [ "$SH" -ge 1 ] 2>/dev/null && Y=$(( (SH - H) / 2 )); [ "$Y" -lt 0 ] && Y=40
+    fi
+  fi
+
+  if [ "$BT" = "chromium" ]; then
+    # NOTE: no --app-icon. The black square used to come from that flag. We rely
+    # on the hicolor-theme icon registered above (matched by --class=nio) so the
+    # taskbar shows the transparent Nio, exactly like a clean install does.
+    "$BROWSER" --app="$URL" --no-first-run --no-default-browser-check \
+      --no-service-autorun --disable-features=Translate,MediaRouter \
+      --class=nio \
+      --window-size=${W},${H} --window-position=${X},${Y} \
+      >/dev/null 2>&1 &
+  elif [ "$BT" = "firefox" ]; then
+    firefox --new-window "$URL" >/dev/null 2>&1 &
+  else
+    command -v xdg-open >/dev/null 2>&1 && xdg-open "$URL" >/dev/null 2>&1 &
+  fi
+}
+open_browser
+
+echo ""
+echo "✓ Nio is alive at $URL"
+echo "  Memory + brain live in: $NIO_HOME"
+echo "  To stop: close the Nio window (Nio cleans itself up)."
+echo ""
+
+wait 2>/dev/null || true

@@ -1,0 +1,6 @@
+{
+  "name": "nio",
+  "type": "module",
+  "private": true,
+  "description": "Nio — a warm, light, 100% local AI friend for Linux. One small app, no cloud, no bloat."
+}

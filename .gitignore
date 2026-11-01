@@ -1,0 +1,12 @@
+# Nio's heavy, non-code pieces never go to git:
+node/
+llama-cpp/
+models/
+*.gguf
+Nio.AppImage
+AppImage
+# local soul / runtime data
+sessions.json
+memory.md
+memory.json
+.DS_Store
