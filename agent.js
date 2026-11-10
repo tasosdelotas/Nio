@@ -417,6 +417,66 @@ const TOOL_MAP = {
   recall: toolRecall,
 };
 
+// ── Tool-call text leak guard ──────────────────────────────────────
+// Small models (Qwen3.5-2B) sometimes emit the tool call as plain text
+// (e.g. a <tool_call> block or a web_search(...) line) instead of using
+// the native tool_calls channel. That text is then shown to the user
+// AND read aloud by TTS. Detect it, strip it from the visible content,
+// and recover the call so the tool still runs.
+const TOOL_LEAK_RE = /<tool_call>[\s\S]*?<\/tool_call>|<function=[A-Za-z0-9_]+>[\s\S]*?<\/function>|[A-Za-z0-9_]+\s*\((?:[^()]*|\([^()]*\))*\)/g;
+const TOOL_LEAK_NAMES = new Set(Object.keys(TOOL_MAP));
+
+function looksLikeToolLeak(text) {
+  if (!text) return false;
+  if (/<tool_call>|<function=/.test(text)) return true;
+  const m = text.match(/[A-Za-z0-9_]+\s*\(/g);
+  return !!(m && m.some((w) => TOOL_LEAK_NAMES.has(w.replace(/\s*\($/, ''))));
+}
+
+function stripToolLeak(text) {
+  if (!text) return text;
+  return String(text).replace(TOOL_LEAK_RE, ' ').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+function recoverLeakedToolCalls(text) {
+  const calls = [];
+  if (!text) return calls;
+  const seen = new Set();
+  const push = (name, args) => {
+    if (!name || !TOOL_LEAK_NAMES.has(name)) return;
+    const key = name + '|' + JSON.stringify(args);
+    if (seen.has(key)) return;
+    seen.add(key);
+    calls.push({ id: `call_${name}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, name, args, parsedArgs: args });
+  };
+  // <function=name> ... </function> or <tool_call><function=name>...</function></tool_call>
+  for (const m of String(text).matchAll(/<function=([A-Za-z0-9_]+)>([\s\S]*?)<\/function>/g)) {
+    const name = m[1];
+    const body = m[2];
+    const args = {};
+    for (const am of body.matchAll(/<([A-Za-z0-9_]+)>([\s\S]*?)<\/\1>/g)) {
+      args[am[1]] = am[2].trim();
+    }
+    push(name, args);
+  }
+  // Bare name(args) — args are comma-separated key="value" pairs
+  for (const m of String(text).matchAll(/([A-Za-z0-9_]+)\s*\(([^()]*)\)/g)) {
+    const name = m[1];
+    if (!TOOL_LEAK_NAMES.has(name)) continue;
+    const args = {};
+    for (const am of m[2].matchAll(/([A-Za-z0-9_]+)\s*=\s*"((?:[^"\\]|\\.)*)"/g)) {
+      args[am[1]] = am[2].replace(/\\"/g, '"');
+    }
+    if (!Object.keys(args).length) {
+      for (const am of m[2].matchAll(/([A-Za-z0-9_]+)\s*=\s*([^,]+)/g)) {
+        args[am[1]] = am[2].trim();
+      }
+    }
+    push(name, args);
+  }
+  return calls;
+}
+
 // ── Tool call parser (handles both OpenAI and llama.cpp formats) ───
 function parseToolCalls(message) {
   const calls = [];
@@ -579,11 +639,23 @@ export class Agent {
         }
 
         const msg = response.choices[0].message;
-        const content = msg.content || '';
-        const toolCalls = parseToolCalls(msg).map(tc => ({
+        let content = msg.content || '';
+        let toolCalls = parseToolCalls(msg).map(tc => ({
           ...tc,
           id: typeof tc.id === 'string' && tc.id ? tc.id : `call_${tc.name}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
         }));
+
+        // ── Tool-call text leak guard ──
+        // The model emitted the tool call as plain text (e.g. a <tool_call>
+        // block) instead of the native tool_calls channel. Strip it from the
+        // visible/speaked content and recover the call so it still runs.
+        if (toolCalls.length === 0 && looksLikeToolLeak(content)) {
+          const recovered = recoverLeakedToolCalls(content);
+          if (recovered.length) {
+            toolCalls = recovered;
+            content = stripToolLeak(content);
+          }
+        }
 
         if (streamedContent.trim()) process.stdout.write('\n');
 

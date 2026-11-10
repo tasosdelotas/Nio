@@ -61,11 +61,25 @@ chmod +x appimagetool.AppImage
    ```
    (Name the output exactly `Nio.AppImage` — not versioned.)
 3. **Verify (do not skip):**
-   - `Nio.AppImage --appimage-extract` → check the AppDir is clean (no `image-input.js`, no `.bak` dirs).
+   - **Extract & inspect the AppDir (type-2 AppImage — `unsquashfs` on the file directly FAILS).**
+     The squashfs payload sits after the ELF runtime; find the `hsqs` magic and slice from there:
+     ```bash
+     OFF=$(grep -abo 'hsqs' Nio.AppImage | head -1 | cut -d: -f1)   # first 'hsqs' = squashfs superblock
+     rm -rf /tmp/nio_v && mkdir -p /tmp/nio_v/squashfs-root
+     tail -c +$OFF Nio.AppImage > /tmp/nio_v/payload.sqsh
+     unsquashfs -d /tmp/nio_v/squashfs-root /tmp/nio_v/payload.sqsh
+     R=/tmp/nio_v/squashfs-root
+     find "$R" -name 'image-input.js' -o -name '*.bak*' | head        # must be empty
+     ls -la "$R/usr/share/nio/nio.png"                                  # must exist (serves /nio.png)
+     grep -c 'looksLikeToolLeak' "$R/usr/share/nio/agent.js"           # must be ≥ 1 (leak guard present)
+     ls -la "$R/usr/share/nio/models/Qwen3.5-2B-GGUF/"                 # 2B GGUF present
+     ```
+     (Note: `--appimage-extract` auto-cleans its FUSE mount, so you can't `ls` it after; the
+     `tail`+`unsquashfs` method above is the reliable way to inspect contents statically.)
    - Boot it: wait for `GET http://127.0.0.1:8791/api/backend` → `"state":"ready"`.
    - Real send: `POST /send` with `{"text":"Reply with exactly: hello"}` → Nio should answer.
    - UI: `GET /` → `<title>Nio</title>`, solid red bubble present, Help button present, **no version string**,
-     `/live-tts.js`, `/nio-avatar.png`, `/marble.jpeg` all 200.
+     `/live-tts.js`, `/nio-avatar.png`, `/nio.png` all 200.
 4. **Clean up:** kill the AppImage's `node web.js` + `llama-server` PIDs (it runs from a FUSE mount
    `/tmp/.mount_Nio.*`; find PIDs with `ss -ltnp | grep -E ':8791|:8091'`).
 5. **Ship:** the final location is **`/home/tasos/Labor/Nio.AppImage`** (now ~1.6 GB, so the
@@ -96,6 +110,13 @@ for sz in 16 22 24 32 48 64 128 256 512; do d="$B/usr/share/icons/hicolor/${sz}x
 ```
 
 ## Gotchas (learned the hard way)
+- **Type-2 AppImage: `unsquashfs Nio.AppImage` FAILS** ("Can't find a valid SQUASHFS superblock").
+  The file is ELF runtime + squashfs payload. Find the `hsqs` magic offset with
+  `grep -abo 'hsqs' Nio.AppImage | head -1`, then `tail -c +$OFF` to slice the payload before
+  `unsquashfs`. `--appimage-extract` also works but auto-removes its FUSE mount, so inspect
+  contents via the `tail`+`unsquashfs` route instead.
+- **`--appimage-extract -o <dir>` is NOT valid** for this runtime ("Unexpected argument count").
+  Use the bare `--appimage-extract` (extracts to a temp FUSE mount) or the `tail` method above.
 - **`/nio.png` must be inside `usr/share/nio/`, not just the AppDir root.** web.js serves it from
   `__dirname` (`usr/share/nio`), so if you only put `nio.png` at the AppDir top level the page favicon
   404s in the AppImage (title bar shows no icon). The one-liner below copies it into `"$NIO/"` — keep that.

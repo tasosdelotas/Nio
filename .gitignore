@@ -11,3 +11,7 @@ memory.md
 memory.json
 .DS_Store
 HANDOFF.md
+# build tooling
+appimagetool.AppImage
+# extracted AppImage contents (used for verification)
+squashfs-root/
