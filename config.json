@@ -1,0 +1,28 @@
+{
+  "llamaCpp": {
+    "port": 8091,
+    "context": 16384,
+    "reasoning": "off",
+    "parallel": 1
+  },
+  "agent": {
+    "timeoutSeconds": 3600,
+    "contextWindow": 16384,
+    "maxTokens": 2048,
+    "temperature": 0.7,
+    "maxTurns": 20,
+    "nudgeIdleMinutes": 5
+  },
+  "tools": {
+    "enabled": [
+      "read",
+      "web_search",
+      "web_fetch",
+      "memory_note"
+    ]
+  },
+  "windowSize": {
+    "width": 1200,
+    "height": 820
+  }
+}

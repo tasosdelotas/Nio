@@ -1,0 +1,20 @@
+{
+  "name": "Nio",
+  "short_name": "Nio",
+  "description": "Your local AI friend, running 100% locally on your Linux PC.",
+  "id": "nio",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1318",
+  "theme_color": "#0f1318",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/nio.png",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

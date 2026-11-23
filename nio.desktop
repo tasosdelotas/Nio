@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Nio
+Comment=Nio — your local AI friend
+Exec=$HOME/Nio/nio
+Icon=$HOME/Nio/nio.png
+StartupWMClass=nio
+Terminal=false
+Categories=Development;Network;Utility;
