@@ -1,0 +1,23 @@
+# --- Heavy bundled runtimes (shipped inside the AppImage / by install.sh, not source) ---
+node/
+llama-cpp/
+
+# --- The model (2.6 GB GGUF; users get it in the AppImage or via install.sh) ---
+models/
+
+# --- Private / internal docs — never push to GitHub ---
+BUILD.md
+HANDOFF.md
+
+# --- Runtime artifacts & local state ---
+memory.md
+memory.md.*
+sessions.json
+nio.log
+*.log
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
